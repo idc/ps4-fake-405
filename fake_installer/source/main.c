@@ -178,7 +178,7 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
   {
     kernel_printf("payload_installer: entrypoint\n");
     void (*payload_entrypoint)();
-    *((void**)&payload_entrypoint) = (void*)(&payload_data[entrypoint_offset]);
+    *((void**)&payload_entrypoint) = (void*)(address + entrypoint_offset);
     payload_entrypoint();
   }
 
