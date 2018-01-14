@@ -106,7 +106,7 @@ void PAYLOAD_DUMMY dummy()
   dummy();
 }
 
-int _main()
+int _start()
 {
   return 0;
 }
