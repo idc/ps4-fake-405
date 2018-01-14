@@ -30,6 +30,11 @@ extern int my_sceSblAuthMgrVerifyHeader(struct self_context* ctx) PAYLOAD_CODE;
 extern int my_sceSblAuthMgrSmLoadSelfSegment__sceSblServiceMailbox(unsigned long service_id, uint8_t* request, void* response) PAYLOAD_CODE;
 extern int my_sceSblAuthMgrSmLoadSelfBlock__sceSblServiceMailbox(unsigned long service_id, uint8_t* request, void* response) PAYLOAD_CODE;
 
+PAYLOAD_CODE void my_entrypoint()
+{
+  // initialization, etc
+}
+
 struct real_info
 {
   const size_t offset;
@@ -90,13 +95,15 @@ struct
   struct real_info* real_infos;
   struct cave_info* cave_infos;
   struct disp_info* disp_infos;
+  void* entrypoint;
 }
 payload_header PAYLOAD_HEADER =
 {
-  0x5041594C4F414431ull,
+  0x5041594C4F414432ull,
   real_infos,
   cave_infos,
   disp_infos,
+  &my_entrypoint,
 };
 
 // dummies -- not included in output payload binary

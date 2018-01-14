@@ -71,7 +71,7 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
   uint8_t* payload_data = args->payload_info->buffer;
   size_t payload_size = args->payload_info->size;
 
-  if (!payload_data || *((uint64_t*)(&payload_data[0])) != 0x5041594C4F414431ull)
+  if (!payload_data || *((uint64_t*)(&payload_data[0])) != 0x5041594C4F414432ull)
   {
     kernel_printf("payload_installer: bad payload data\n");
     return -2;
@@ -171,6 +171,15 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
       *((int32_t*)target) = disp;
       writeCr0(cr0);
     }
+  }
+
+  uint64_t entrypoint_offset = *((uint64_t*)&payload_data[32]);
+  if (entrypoint_offset != 0 && entrypoint_offset < payload_size)
+  {
+    kernel_printf("payload_installer: entrypoint\n");
+    void (*payload_entrypoint)();
+    *((void**)&payload_entrypoint) = (void*)(&payload_data[entrypoint_offset]);
+    payload_entrypoint();
   }
 
   kernel_printf("payload_installer: done\n");
