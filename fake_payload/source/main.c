@@ -43,7 +43,8 @@ struct real_info
 
 struct cave_info
 {
-  const size_t kernel_offset;
+  const size_t kernel_call_offset;
+  const size_t kernel_ptr_offset;
   const void* payload_target;
 };
 
@@ -70,14 +71,17 @@ struct real_info real_infos[] PAYLOAD_DATA =
   { 0, NULL },
 };
 
+#define ADJACENT(x) \
+  x, x + 6
 struct cave_info cave_infos[] PAYLOAD_DATA =
 {
-  { 0x6116F1, &my_sceSblAuthMgrIsLoadable2 },
-  { 0x612EA1, &my_sceSblAuthMgrVerifyHeader },
-  { 0x617A32, &my_sceSblAuthMgrSmLoadSelfSegment__sceSblServiceMailbox },
-  { 0x617B80, &my_sceSblAuthMgrSmLoadSelfBlock__sceSblServiceMailbox },
-  { 0, NULL },
+  { ADJACENT(0x6116F1), &my_sceSblAuthMgrIsLoadable2 },
+  { ADJACENT(0x612EA1), &my_sceSblAuthMgrVerifyHeader },
+  { ADJACENT(0x617A32), &my_sceSblAuthMgrSmLoadSelfSegment__sceSblServiceMailbox },
+  { ADJACENT(0x617B80), &my_sceSblAuthMgrSmLoadSelfBlock__sceSblServiceMailbox },
+  { 0, 0, NULL },
 };
+#undef ADJACENT
 
 struct disp_info disp_infos[] PAYLOAD_DATA =
 {
@@ -99,7 +103,7 @@ struct
 }
 payload_header PAYLOAD_HEADER =
 {
-  0x5041594C4F414432ull,
+  0x5041594C4F414433ull,
   real_infos,
   cave_infos,
   disp_infos,

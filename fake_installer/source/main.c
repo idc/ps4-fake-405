@@ -49,7 +49,8 @@ struct real_info
 
 struct cave_info
 {
-  const size_t kernel_offset;
+  const size_t kernel_call_offset;
+  const size_t kernel_ptr_offset;
   const size_t payload_offset;
 };
 
@@ -101,7 +102,7 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
 
   if (!payload_data ||
       payload_size < sizeof(payload_header) ||
-      payload_header->signature != 0x5041594C4F414432ull)
+      payload_header->signature != 0x5041594C4F414433ull)
   {
     kernel_printf("payload_installer: bad payload data\n");
     return -2;
@@ -166,31 +167,51 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
     struct cave_info* cave_info =
       (struct cave_info*)(&payload_data[payload_header->cave_info_offset]);
     for (
-      ; cave_info->payload_offset != 0 && cave_info->kernel_offset != 0
+      ; cave_info->kernel_call_offset != 0 &&
+        cave_info->kernel_ptr_offset != 0 &&
+        cave_info->payload_offset != 0
       ; ++cave_info)
     {
-      uint8_t* kernel_target = &kernel_base[cave_info->kernel_offset];
+      uint8_t* kernel_call_target = &kernel_base[cave_info->kernel_call_offset];
+      uint8_t* kernel_ptr_target = &kernel_base[cave_info->kernel_ptr_offset];
       void* payload_target = &payload_buffer[cave_info->payload_offset];
-      kernel_printf("  %lx(%lx) : %lx(%lx)\n",
-        cave_info->kernel_offset, kernel_target,
+      int32_t new_disp = (int32_t)(kernel_ptr_target - &kernel_call_target[6]);
+
+      if (&kernel_call_target[6] == kernel_ptr_target)
+      {
+        kernel_printf("  %lx(%lx)\n",
+          cave_info->kernel_call_offset, kernel_call_target);
+      }
+      else
+      {
+        kernel_printf("  %lx(%lx) -> %lx(%lx) = %d\n",
+          cave_info->kernel_call_offset, kernel_call_target,
+          cave_info->kernel_ptr_offset, kernel_ptr_target,
+          new_disp);
+      }
+      kernel_printf("    %lx(%lx)\n",
         cave_info->payload_offset, payload_target);
+
+      if ((uint64_t)(kernel_ptr_target - &kernel_call_target[6]) > UINT32_MAX)
+      {
+        kernel_printf("  error! new_disp > UINT32_MAX!\n");
+      }
 
 #pragma pack(push,1)
       struct
       {
         uint8_t op[2];
         int32_t disp;
-        uint64_t address;
       }
       jmp;
 #pragma pack(pop)
       jmp.op[0] = 0xFF;
       jmp.op[1] = 0x25;
-      jmp.disp = 0;
-      jmp.address = (uint64_t)payload_target;
+      jmp.disp = new_disp;
       cr0 = readCr0();
       writeCr0(cr0 & ~X86_CR0_WP);
-      kernel_memcpy(kernel_target, &jmp, sizeof(jmp));
+      kernel_memcpy(kernel_call_target, &jmp, sizeof(jmp));
+      kernel_memcpy(kernel_ptr_target, &payload_target, sizeof(void*));
       writeCr0(cr0);
     }
   }
