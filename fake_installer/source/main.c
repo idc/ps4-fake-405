@@ -41,6 +41,33 @@ struct syscall_install_payload_args
   struct payload_info* payload_info;
 };
 
+struct real_info
+{
+  const size_t kernel_offset;
+  const size_t payload_offset;
+};
+
+struct cave_info
+{
+  const size_t kernel_offset;
+  const size_t payload_offset;
+};
+
+struct disp_info
+{
+  const size_t call_offset;
+  const size_t cave_offset;
+};
+
+struct payload_header
+{
+  uint64_t signature;
+  size_t real_info_offset;
+  size_t cave_info_offset;
+  size_t disp_info_offset;
+  size_t entrypoint_offset;
+};
+
 int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
 {
   uint64_t cr0;
@@ -70,8 +97,11 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
 
   uint8_t* payload_data = args->payload_info->buffer;
   size_t payload_size = args->payload_info->size;
+  struct payload_header* payload_header = (struct payload_header*)payload_data;
 
-  if (!payload_data || *((uint64_t*)(&payload_data[0])) != 0x5041594C4F414432ull)
+  if (!payload_data ||
+      payload_size < sizeof(payload_header) ||
+      payload_header->signature != 0x5041594C4F414432ull)
   {
     kernel_printf("payload_installer: bad payload data\n");
     return -2;
@@ -87,8 +117,8 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
   writeCr0(cr0);
 
   kernel_printf("payload_installer: kmem_alloc\n");
-  uint64_t address = (uint64_t)kmem_alloc(kernel_map, desired_size);
-  if (!address)
+  uint8_t* payload_buffer = (uint8_t*)kmem_alloc(kernel_map, desired_size);
+  if (!payload_buffer)
   {
     kernel_printf("payload_installer: kmem_alloc failed\n");
     return -3;
@@ -102,34 +132,48 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
   writeCr0(cr0);
 
   kernel_printf("payload_installer: installing...\n");
-  kernel_printf("payload_installer: target=%lx\n", address);
-  kernel_printf("payload_installer: payload=%lx,%lu\n", payload_data, payload_size);
+  kernel_printf("payload_installer: target=%lx\n", payload_buffer);
+  kernel_printf("payload_installer: payload=%lx,%lu\n",
+    payload_data, payload_size);
 
   kernel_printf("payload_installer: memcpy\n");
-  kernel_memcpy((void*)address, payload_data, payload_size);
+  kernel_memcpy((void*)payload_buffer, payload_data, payload_size);
 
-  uint64_t real_info_offset = *((uint64_t*)&payload_data[8]);
   kernel_printf("payload_installer: patching payload pointers\n");
-  if (real_info_offset != 0 && real_info_offset < payload_size)
+  if (payload_header->real_info_offset != 0 &&
+    payload_header->real_info_offset + sizeof(struct real_info) <= payload_size)
   {
-    uint64_t* real_info = (uint64_t*)(&payload_data[real_info_offset]);
-    for (; real_info[0] != 0; real_info += 2)
+    struct real_info* real_info =
+      (struct real_info*)(&payload_data[payload_header->real_info_offset]);
+    for (
+      ; real_info->payload_offset != 0 && real_info->kernel_offset != 0
+      ; ++real_info)
     {
-      uint64_t* target = (uint64_t*)(address + real_info[1]);
-      *target = (uint64_t)(&kernel_base[real_info[0]]);
-      kernel_printf("  %x(%lx) = %x(%lx)\n", real_info[1], target, real_info[0], *target);
+      uint64_t* payload_target =
+        (uint64_t*)(&payload_buffer[real_info->payload_offset]);
+      void* kernel_target = &kernel_base[real_info->kernel_offset];
+      *payload_target = (uint64_t)kernel_target;
+      kernel_printf("  %x(%lx) = %x(%lx)\n",
+        real_info->payload_offset, payload_target,
+        real_info->kernel_offset, kernel_target);
     }
   }
 
-  uint64_t cave_info_offset = *((uint64_t*)&payload_data[16]);
   kernel_printf("payload_installer: patching caves\n");
-  if (cave_info_offset != 0 && cave_info_offset < payload_size)
+  if (payload_header->cave_info_offset != 0 &&
+    payload_header->cave_info_offset + sizeof(struct cave_info) <= payload_size)
   {
-    uint64_t* cave_info = (uint64_t*)(&payload_data[cave_info_offset]);
-    for (; cave_info[0] != 0 && cave_info[1] != 0; cave_info += 2)
+    struct cave_info* cave_info =
+      (struct cave_info*)(&payload_data[payload_header->cave_info_offset]);
+    for (
+      ; cave_info->payload_offset != 0 && cave_info->kernel_offset != 0
+      ; ++cave_info)
     {
-      uint8_t* target = &kernel_base[cave_info[0]];
-      kernel_printf("  %lx(%lx) : %lx(%lx)\n", cave_info[0], target, cave_info[1], address + cave_info[1]);
+      uint8_t* kernel_target = &kernel_base[cave_info->kernel_offset];
+      void* payload_target = &payload_buffer[cave_info->payload_offset];
+      kernel_printf("  %lx(%lx) : %lx(%lx)\n",
+        cave_info->kernel_offset, kernel_target,
+        cave_info->payload_offset, payload_target);
 
 #pragma pack(push,1)
       struct
@@ -143,42 +187,50 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
       jmp.op[0] = 0xFF;
       jmp.op[1] = 0x25;
       jmp.disp = 0;
-      jmp.address = address + cave_info[1];
+      jmp.address = (uint64_t)payload_target;
       cr0 = readCr0();
       writeCr0(cr0 & ~X86_CR0_WP);
-      kernel_memcpy(target, &jmp, sizeof(jmp));
+      kernel_memcpy(kernel_target, &jmp, sizeof(jmp));
       writeCr0(cr0);
     }
   }
 
   kernel_printf("payload_installer: patching calls\n");
-  uint64_t disp_info_offset = *((uint64_t*)&payload_data[24]);
-  if (disp_info_offset != 0 && disp_info_offset < payload_size)
+  if (payload_header->disp_info_offset != 0 &&
+    payload_header->disp_info_offset + sizeof(struct disp_info) <= payload_size)
   {
-    uint64_t* disp_info = (uint64_t*)(&payload_data[disp_info_offset]);
-    for (; disp_info[0] != 0 && disp_info[1] != 0; disp_info += 2)
+    struct disp_info* disp_info =
+      (struct disp_info*)(&payload_data[payload_header->disp_info_offset]);
+    for (
+      ; disp_info->call_offset != 0 && disp_info->cave_offset != 0
+      ; ++disp_info)
     {
-      uint8_t* cave = &kernel_base[disp_info[1]];
-      uint8_t* rip = &kernel_base[disp_info[0] + 5];
-      int32_t disp = (int32_t)(cave - rip);
-      uint8_t* target = &kernel_base[disp_info[0] + 1];
+      uint8_t* cave_target = &kernel_base[disp_info->cave_offset];
+      uint8_t* call_target = &kernel_base[disp_info->call_offset];
 
-      kernel_printf("  %lx(%lx)\n", disp_info[0]+1, target);
-      kernel_printf("    %lx(%lx) -> %lx(%lx) = %d\n", disp_info[0]+5, rip, disp_info[1], cave, disp);
+      int32_t new_disp = (int32_t)(cave_target - &call_target[5]);
+
+      kernel_printf("  %lx(%lx)\n",
+        disp_info->call_offset + 1, &call_target[1]);
+      kernel_printf("    %lx(%lx) -> %lx(%lx) = %d\n",
+        disp_info->call_offset + 5, &call_target[5],
+        disp_info->cave_offset, cave_target,
+        new_disp);
 
       cr0 = readCr0();
       writeCr0(cr0 & ~X86_CR0_WP);
-      *((int32_t*)target) = disp;
+      *((int32_t*)&call_target[1]) = new_disp;
       writeCr0(cr0);
     }
   }
 
-  uint64_t entrypoint_offset = *((uint64_t*)&payload_data[32]);
-  if (entrypoint_offset != 0 && entrypoint_offset < payload_size)
+  if (payload_header->entrypoint_offset != 0 &&
+    payload_header->entrypoint_offset < payload_size)
   {
     kernel_printf("payload_installer: entrypoint\n");
     void (*payload_entrypoint)();
-    *((void**)&payload_entrypoint) = (void*)(address + entrypoint_offset);
+    *((void**)&payload_entrypoint) =
+      (void*)(&payload_buffer[payload_header->entrypoint_offset]);
     payload_entrypoint();
   }
 

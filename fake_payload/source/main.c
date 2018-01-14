@@ -37,14 +37,14 @@ PAYLOAD_CODE void my_entrypoint()
 
 struct real_info
 {
-  const size_t offset;
-  const void* target;
+  const size_t kernel_offset;
+  const void* payload_target;
 };
 
 struct cave_info
 {
-  const size_t offset;
-  const void* target;
+  const size_t kernel_offset;
+  const void* payload_target;
 };
 
 struct disp_info
