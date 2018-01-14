@@ -179,8 +179,14 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
 
       if (&kernel_call_target[6] == kernel_ptr_target)
       {
-        kernel_printf("  %lx(%lx)\n",
-          cave_info->kernel_call_offset, kernel_call_target);
+        kernel_printf("  %lx(%lx) = %d\n",
+          cave_info->kernel_call_offset, kernel_call_target,
+          new_disp);
+
+        if ((uint64_t)(kernel_ptr_target - &kernel_call_target[6]) != 0)
+        {
+          kernel_printf("  error: new_disp != 0!\n");
+        }
       }
       else
       {
@@ -188,14 +194,14 @@ int syscall_install_payload(void* td, struct syscall_install_payload_args* args)
           cave_info->kernel_call_offset, kernel_call_target,
           cave_info->kernel_ptr_offset, kernel_ptr_target,
           new_disp);
+
+        if ((uint64_t)(kernel_ptr_target - &kernel_call_target[6]) > UINT32_MAX)
+        {
+          kernel_printf("  error: new_disp > UINT32_MAX!\n");
+        }
       }
       kernel_printf("    %lx(%lx)\n",
         cave_info->payload_offset, payload_target);
-
-      if ((uint64_t)(kernel_ptr_target - &kernel_call_target[6]) > UINT32_MAX)
-      {
-        kernel_printf("  error! new_disp > UINT32_MAX!\n");
-      }
 
 #pragma pack(push,1)
       struct
